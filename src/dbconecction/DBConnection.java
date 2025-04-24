@@ -7,6 +7,8 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.Duration;
 import java.util.Scanner;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.mindrot.jbcrypt.BCrypt;
 /**
  *
@@ -33,7 +35,6 @@ public class DBConnection {
             
             System.out.print("Introduce tu password: ");
             String pass = sc.nextLine();
-            String hashed = BCrypt.hashpw(pass, BCrypt.gensalt(12));
             
             /*String sql = "ALTER TABLE users ADD COLUMN failed_attempts INT DEFAULT 0, ADD COLUMN last_attempt TIMESTAMP";
             pstmt = conn.prepareStatement(sql);
@@ -49,7 +50,7 @@ public class DBConnection {
                 Timestamp lastAttempt = rs.getTimestamp("last_attempt");
                 String userHash = rs.getString("password");
                 
-                if(attempts >= 3) {
+                if(attempts >= 3 && lastAttempt != null) {
                     //Ultimo intento
                     LocalDateTime ultimoAttempt = lastAttempt.toLocalDateTime();
                     //Intento actual
@@ -59,18 +60,19 @@ public class DBConnection {
                     
                     if(diff.toMinutes() < 5) {
                         System.out.println("La cuenta ha sido bloqueada por 5 minutos, intentalo mas tarde.");
+                        Thread.sleep(300000);
                         return;
                     } else {
                         String reinicioAttempts = "UPDATE users SET failed_attempts = 0 WHERE username = ?";
                         PreparedStatement reset = conn.prepareStatement(reinicioAttempts);
-                        pstmt.setString(1, user);
-                        pstmt.executeUpdate();
+                        reset.setString(1, user);
+                        reset.executeUpdate();
                         attempts = 0;
                         
                     }
                 }
-                if (BCrypt.checkpw(pass, hashed)) {
-                System.out.println("Bienvenido Champion " + hashed);
+                if (BCrypt.checkpw(pass, userHash)) {
+                System.out.println("Bienvenido Champion " + user);
                 String sqlupdate = "update users set failed_attempts = 0 WHERE username = ?";
                 pstmt = conn.prepareStatement(sqlupdate);
                 pstmt.setString(1, user);
@@ -78,7 +80,7 @@ public class DBConnection {
                 
                 } else {
                     attempts++;
-                    String sumaAttempts = "UPDATE users failed_attempts = 0, last_attempt = ? CURRENT_TIMESTAMP WHERE username = ?";
+                    String sumaAttempts = "UPDATE users SET failed_attempts = ?, last_attempt = CURRENT_TIMESTAMP WHERE username = ?";
                     pstmt = conn.prepareStatement(sumaAttempts);
                     pstmt.setInt(1, attempts);
                     pstmt.setString(2, user);
@@ -92,6 +94,8 @@ public class DBConnection {
         } catch (SQLException ex) {
             System.err.println("Error al realizar la consulta: " +
             ex.getMessage());
+        } catch (InterruptedException ex) {
+            Logger.getLogger(DBConnection.class.getName()).log(Level.SEVERE, null, ex);
         }
         
     }
