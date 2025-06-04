@@ -22,82 +22,86 @@ public class DBConnection {
         String username = "root";
         String password = "root";
         
-        PreparedStatement pstmt = null;
-        ResultSet rs = null;
-        //conexion mysql driver
-        try (Connection conn = DriverManager.getConnection(url, username, password);) {
-            
-            System.out.println("Pueden Comenzar las operaciones con la base de datos.");
-            
-            //Variables del usuario
+        while (true) {
+            // Pedir datos al usuario
+            System.out.println("Por favor, introduce tus datos:");
             System.out.print("Introduce tu nombre de usuario: ");
             String user = sc.nextLine();
-            
             System.out.print("Introduce tu password: ");
             String pass = sc.nextLine();
             
-            /*String sql = "ALTER TABLE users ADD COLUMN failed_attempts INT DEFAULT 0, ADD COLUMN last_attempt TIMESTAMP";
-            pstmt = conn.prepareStatement(sql);
-            pstmt.executeUpdate(sql);
-             */
-            String sql1 = "SELECT * FROM users WHERE username = ?";
-            pstmt = conn.prepareStatement(sql1);
-            pstmt.setString(1, user);
-            rs = pstmt.executeQuery();
-            
-            if (rs.next()) {
-                int attempts = rs.getInt("failed_attempts");
-                Timestamp lastAttempt = rs.getTimestamp("last_attempt");
-                String userHash = rs.getString("password");
+            // Conectar a la base de datos
+            try (Connection conn = DriverManager.getConnection(url, username, password)) {
                 
-                if(attempts >= 3 && lastAttempt != null) {
-                    //Ultimo intento
-                    LocalDateTime ultimoAttempt = lastAttempt.toLocalDateTime();
-                    //Intento actual
-                    LocalDateTime attemptActual = LocalDateTime.now();
-                    //Diferencia entre estos anteriores
-                    Duration diff = Duration.between(ultimoAttempt, attemptActual);
-                    
-                    if(diff.toMinutes() < 5) {
-                        System.out.println("La cuenta ha sido bloqueada por 5 minutos, intentalo mas tarde.");
-                        Thread.sleep(300000);
-                        return;
-                    } else {
-                        String reinicioAttempts = "UPDATE users SET failed_attempts = 0 WHERE username = ?";
-                        PreparedStatement reset = conn.prepareStatement(reinicioAttempts);
-                        reset.setString(1, user);
-                        reset.executeUpdate();
-                        attempts = 0;
-                        
-                    }
-                }
-                if (BCrypt.checkpw(pass, userHash)) {
-                System.out.println("Bienvenido Champion " + user);
-                String sqlupdate = "update users set failed_attempts = 0 WHERE username = ?";
-                pstmt = conn.prepareStatement(sqlupdate);
+                PreparedStatement pstmt = null;
+                String sql;
+                
+                // Obtener información del usuario
+                sql = "SELECT password, failed_attempts, last_attempt FROM users WHERE username = ?";
+                pstmt = conn.prepareStatement(sql);
                 pstmt.setString(1, user);
-                pstmt.executeUpdate();
+                ResultSet rs = pstmt.executeQuery();
                 
+                if (rs.next()) {
+                    // Obtener valores de la base de datos
+                    String hash = rs.getString("password");
+                    int failedAttempts = rs.getInt("failed_attempts");
+                    Timestamp lastAttemptTimestamp = rs.getTimestamp("last_attempt");
+                    LocalDateTime lastAttempt = lastAttemptTimestamp != null ? lastAttemptTimestamp.toLocalDateTime() : null;
+                    
+                    // Verificar si la cuenta está bloqueada
+                    if (failedAttempts >= 3 && lastAttempt != null && Duration.between(lastAttempt, LocalDateTime.now()).toMinutes() < 5) {
+                        long minutosRestantes = 5 - Duration.between(lastAttempt, LocalDateTime.now()).toMinutes();
+                        System.out.println("Cuenta bloqueada. Intentalo dentro de " + minutosRestantes + " minutos.");
+                    } else {
+                        // Verificar la contraseña
+                        if (BCrypt.checkpw(pass, hash)) {
+                            System.out.println("Bienvenido Champion " + user);
+                            // Reiniciar contador de intentos fallidos
+                            sql = "UPDATE users SET failed_attempts = 0, last_attempt = NULL WHERE username = ?";
+                            pstmt = conn.prepareStatement(sql);
+                            pstmt.setString(1, user);
+                            pstmt.executeUpdate();
+                            break; // Salir del bucle al login exitoso
+                        } else {
+                            System.out.println("Usuario o contraseña incorrectos.");
+                            // Incrementar contador de intentos fallidos
+                            sql = "UPDATE users SET failed_attempts = failed_attempts + 1, last_attempt = ? WHERE username = ?";
+                            pstmt = conn.prepareStatement(sql);
+                            pstmt.setTimestamp(1, Timestamp.valueOf(LocalDateTime.now()));
+                            pstmt.setString(2, user);
+                            pstmt.executeUpdate();
+                            
+                            // Verificar si se alcanzó el límite después de la actualización
+                            sql = "SELECT failed_attempts FROM users WHERE username = ?";
+                            pstmt = conn.prepareStatement(sql);
+                            pstmt.setString(1, user);
+                            ResultSet rsAttempts = pstmt.executeQuery();
+                            if (rsAttempts.next()) {
+                                int newAttempts = rsAttempts.getInt("failed_attempts");
+                                if (newAttempts >= 3) {
+                                    System.out.println("La cuenta ha sido bloqueada por 5 minutos, intentalo mas tarde.");
+                                } else {
+                                    System.out.println("Intento " + newAttempts + " de 3.");
+                                }
+                            }
+                        }
+                    }
                 } else {
-                    attempts++;
-                    String sumaAttempts = "UPDATE users SET failed_attempts = ?, last_attempt = CURRENT_TIMESTAMP WHERE username = ?";
-                    pstmt = conn.prepareStatement(sumaAttempts);
-                    pstmt.setInt(1, attempts);
-                    pstmt.setString(2, user);
-                    pstmt.executeUpdate();
-                    System.out.println("Password incorrecta intento " + attempts + " de 3.");
+                    System.out.println("Usuario no encontrado.");
                 }
-            } else {
-                System.out.println("Usuario Incorrecto.");
+                
+                System.out.println("[*] Volver a intentar? [s/n]: ");
+                String respuesta = sc.nextLine();
+                if (!respuesta.equalsIgnoreCase("s")) {
+                    break;
+                }
+                
+            } catch (SQLException ex) {
+                System.err.println("Error al realizar la consulta: " + ex.getMessage());
             }
-            
-        } catch (SQLException ex) {
-            System.err.println("Error al realizar la consulta: " +
-            ex.getMessage());
-        } catch (InterruptedException ex) {
-            Logger.getLogger(DBConnection.class.getName()).log(Level.SEVERE, null, ex);
         }
         
+        sc.close();
     }
-    
 }
